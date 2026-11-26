@@ -16,30 +16,57 @@ const agentActionSchema = z.object({
   action: z.enum(["create", "complete", "delete", "list", "chat"]),
   taskId: z.string().optional(),
   title: z.string().optional(),
+  due: z.string().optional(),
   say: z.string().min(1),
 });
 
 type AgentAction = z.infer<typeof agentActionSchema>;
 
+// 到期时间格式与任务 API 的校验保持一致
+const duePattern = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?$/;
+
+// 以上海时区为准取当前日期时间，供模型推算「明天」「周五」等相对时间
+function todayInfo(): string {
+  const now = new Date();
+  const options = { timeZone: "Asia/Shanghai" } as const;
+  const date = new Intl.DateTimeFormat("sv-SE", {
+    ...options,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const time = new Intl.DateTimeFormat("sv-SE", {
+    ...options,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(now);
+  const weekday = new Intl.DateTimeFormat("zh-CN", { ...options, weekday: "long" }).format(now);
+  return `${date} ${weekday} ${time}`;
+}
+
 function renderTaskList(): string {
   const items = tasks.list();
   if (items.length === 0) return "（当前清单为空）";
   return items
-    .map(
-      (task, index) =>
-        `${index + 1}. [${task.done ? "已完成" : "待办"}] ${task.title}（id: ${task.id}）`,
-    )
+    .map((task, index) => {
+      const status = task.done ? "已完成" : "待办";
+      const due = task.due ? `，到期: ${task.due}` : "";
+      return `${index + 1}. [${status}] ${task.title}（id: ${task.id}${due}）`;
+    })
     .join("\n");
 }
 
 function buildSystemPrompt(): string {
   return `你是「小明」，通过中文对话帮用户管理待办清单的智能助手。
 
+今天是 ${todayInfo()}（中国标准时间）。
+
 当前任务清单（实时）：
 ${renderTaskList()}
 
 你每轮只能输出一个 JSON 对象，字段如下：
-{"action":"create|complete|delete|list|chat","taskId":"...","title":"...","say":"对用户说的话"}
+{"action":"create|complete|delete|list|chat","taskId":"...","title":"...","due":"...","say":"对用户说的话"}
 
 操作说明：
 - create 新增待办：title 为简洁的任务名，去掉「帮我记一下」等口语包装。
@@ -51,9 +78,11 @@ ${renderTaskList()}
 规则：
 1. 用户可能用模糊说法指代任务（如「牛奶买好了」指「买牛奶」），根据语义匹配 taskId；匹配不到时不要猜测，改用 chat 向用户确认。
 2. 每轮只能执行一个操作。用户提出批量请求（如「全删掉」「都标完成」）时，执行其中一个，并在 say 中诚实说明一次只能处理一条，引导用户继续下一条指令；绝不能声称已完成实际未执行的操作。
-3. say 用简短、友好的中文口语直接回应用户这条消息；list 时逐条展示任务名和完成状态。
-4. 妥善利用对话历史理解上下文（如「再记一条」要结合之前的内容）。
-5. 不要编造清单里不存在的任务，不要执行清单以外的操作。`;
+3. create 时若用户提到了明确的截止时间（如「明天上午十点」「周五」「今天下午三点」），结合今天的日期换算为 due 字段，格式为 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm；没有明确时间就省略 due。
+4. 用户询问「今天有哪些任务到期」时，比较各任务 due 的日期部分与今天的日期，在 say 中只列出今天到期的任务；若都没有到期，如实告知。
+5. say 用简短、友好的中文口语直接回应用户这条消息。list 时把待办任务排在前面、已完成的排在后面，带序号展示任务名和完成状态；任务有到期时间时一并展示。
+6. 妥善利用对话历史理解上下文（如「再记一条」要结合之前的内容）。
+7. 不要编造清单里不存在的任务，不要执行清单以外的操作。`;
 }
 
 // response_format 已约束为 JSON，这里再兜底处理可能的代码围栏
@@ -80,7 +109,8 @@ function executeAction(action: AgentAction): string {
     case "create": {
       const title = action.title?.trim().slice(0, 200);
       if (!title) return "好的，你想记什么事呢？告诉我具体内容吧。";
-      tasks.create(title);
+      const due = action.due?.trim().replace(" ", "T").slice(0, 40);
+      tasks.create(title, due && duePattern.test(due) ? due : undefined);
       return action.say;
     }
     case "complete": {
