@@ -99,30 +99,30 @@ function executeAction(action: AgentAction): string {
 export async function reply(messages: ChatMessage[]): Promise<string> {
   try {
     const client = getModelClient();
-    const completion = await client.chat.completions.create({
-      model,
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-      messages: [{ role: "system", content: buildSystemPrompt() }, ...messages],
-    });
+    // 模型偶发返回空内容或结构不符，自动重试一次
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const completion = await client.chat.completions.create({
+        model,
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+        messages: [{ role: "system", content: buildSystemPrompt() }, ...messages],
+      });
 
-    const choice = completion.choices[0];
-    const content = choice?.message?.content;
-    if (!content?.trim()) {
-      return fallbackReply(
-        `模型返回了空内容: ${JSON.stringify({
-          finish: choice?.finish_reason,
-          content: choice?.message?.content,
-          hasReasoning: Boolean(choice?.message?.reasoning_content),
-        })}`,
-      );
-    }
+      const choice = completion.choices[0];
+      const content = choice?.message?.content;
+      if (!content?.trim()) {
+        console.error(
+          `[agent] 第 ${attempt} 次模型调用返回空内容: finish=${choice?.finish_reason}`,
+        );
+        continue;
+      }
 
-    const parsed = agentActionSchema.safeParse(extractJson(content));
-    if (!parsed.success) {
-      return fallbackReply(`模型输出不符合约定结构: ${JSON.stringify(content)}`);
+      const parsed = agentActionSchema.safeParse(extractJson(content));
+      if (parsed.success) return executeAction(parsed.data);
+
+      console.error(`[agent] 第 ${attempt} 次模型输出不符合约定结构: ${JSON.stringify(content)}`);
     }
-    return executeAction(parsed.data);
+    return "我这边出了点小状况，请稍后再试一次。";
   } catch (error) {
     return fallbackReply(`智能体执行失败: ${String(error)}`);
   }
