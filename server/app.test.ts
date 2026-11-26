@@ -51,7 +51,9 @@ test("任务 API 可以创建、列出、修改和删除任务", async (t) => {
   assert.equal(created.status, 201);
   const task = created.body;
   assert.equal(typeof task.id, "string");
-  assert.deepEqual(task, { id: task.id, title: "买牛奶", done: false });
+  assert.equal(task.title, "买牛奶");
+  assert.equal(task.done, false);
+  assert.equal(typeof task.createdAt, "string");
 
   const item = collection + "/" + task.id;
   const completed = await request("PATCH", item, { done: true });

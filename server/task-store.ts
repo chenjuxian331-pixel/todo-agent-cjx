@@ -8,6 +8,7 @@ const storedTask = z.looseObject({
   title: z.string(),
   done: z.boolean(),
   due: z.string().optional(),
+  createdAt: z.string().optional(),
 });
 const taskList = z.array(storedTask);
 type Task = z.infer<typeof storedTask>;
@@ -38,7 +39,13 @@ export function createJsonTaskStore(filename: string): TaskStore {
     list,
 
     create(title, due) {
-      const task = { id: randomUUID(), title, done: false, ...(due ? { due } : {}) };
+      const task = {
+        id: randomUUID(),
+        title,
+        done: false,
+        createdAt: new Date().toISOString(),
+        ...(due ? { due } : {}),
+      };
       save([...list(), task]);
       return task;
     },

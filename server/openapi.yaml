@@ -93,6 +93,10 @@ components:
         title: { $ref: "#/components/schemas/Title" }
         done: { type: boolean }
         due: { $ref: "#/components/schemas/Due" }
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间（ISO 8601），用于区分同名任务
     Error:
       type: object
       required: [error]

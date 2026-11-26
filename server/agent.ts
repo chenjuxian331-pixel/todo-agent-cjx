@@ -45,14 +45,37 @@ function todayInfo(): string {
   return `${date} ${weekday} ${time}`;
 }
 
+// 把 ISO 创建时间转成「刚刚 / N 分钟前 / 昨天」等易读说法，方便模型和用户区分同名任务
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diff = Date.now() - then;
+  const minute = 60_000;
+  const hour = 3_600_000;
+  const day = 86_400_000;
+  if (diff < minute) return "刚刚";
+  if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`;
+  if (diff < day) return `${Math.floor(diff / hour)} 小时前`;
+  const days = Math.floor(diff / day);
+  if (days === 1) return "昨天";
+  if (days <= 7) return `${days} 天前`;
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+}
+
 function renderTaskList(): string {
   const items = tasks.list();
   if (items.length === 0) return "（当前清单为空）";
   return items
     .map((task, index) => {
       const status = task.done ? "已完成" : "待办";
+      const created = task.createdAt ? `，记于${relativeTime(task.createdAt)}` : "";
       const due = task.due ? `，到期: ${task.due}` : "";
-      return `${index + 1}. [${status}] ${task.title}（id: ${task.id}${due}）`;
+      return `${index + 1}. [${status}] ${task.title}（id: ${task.id}${created}${due}）`;
     })
     .join("\n");
 }
@@ -77,12 +100,14 @@ ${renderTaskList()}
 
 规则：
 1. 用户可能用模糊说法指代任务（如「牛奶买好了」指「买牛奶」），根据语义匹配 taskId；匹配不到时不要猜测，改用 chat 向用户确认。
-2. 每轮只能执行一个操作。用户提出批量请求（如「全删掉」「都标完成」）时，执行其中一个，并在 say 中诚实说明一次只能处理一条，引导用户继续下一条指令；绝不能声称已完成实际未执行的操作。
-3. create 时若用户提到了明确的截止时间（如「明天上午十点」「周五」「今天下午三点」），结合今天的日期换算为 due 字段，格式为 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm；没有明确时间就省略 due。
-4. 用户询问「今天有哪些任务到期」时，比较各任务 due 的日期部分与今天的日期，在 say 中只列出今天到期的任务；若都没有到期，如实告知。
-5. say 用简短、友好的中文口语直接回应用户这条消息。list 时把待办任务排在前面、已完成的排在后面，带序号展示任务名和完成状态；任务有到期时间时一并展示。
-6. 妥善利用对话历史理解上下文（如「再记一条」要结合之前的内容）。
-7. 不要编造清单里不存在的任务，不要执行清单以外的操作。`;
+2. 用户也可能用序号指代任务（如「第二条」「第一个」「最后一条」），按上方清单展示的序号对应找到任务。
+3. 每轮只能执行一个操作。用户提出批量请求（如「全删掉」「都标完成」）时，执行其中一个，并在 say 中诚实说明一次只能处理一条，引导用户继续下一条指令；绝不能声称已完成实际未执行的操作。
+4. create 时若清单中已存在标题相同的待办任务，除非用户明确表示要再记一条（如「再记一条买牛奶」），否则先用 chat 反问：「已有一条相同的待办，是要再记一条，还是刚才那条没记上？」确认后再执行。
+5. create 时若用户提到了明确的截止时间（如「明天上午十点」「周五」「今天下午三点」），结合今天的日期换算为 due 字段，格式为 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm；没有明确时间就省略 due。
+6. 用户询问「今天有哪些任务到期」时，比较各任务 due 的日期部分与今天的日期，在 say 中只列出今天到期的任务；若都没有到期，如实告知。
+7. say 用简短、友好的中文口语直接回应用户这条消息。list 时把待办任务排在前面、已完成的排在后面，带序号展示任务名和完成状态；任务有到期时间或创建时间时可一并展示，帮助用户区分同名任务。
+8. 妥善利用对话历史理解上下文（如「再记一条」要结合之前的内容）。
+9. 不要编造清单里不存在的任务，不要执行清单以外的操作。`;
 }
 
 // response_format 已约束为 JSON，这里再兜底处理可能的代码围栏
