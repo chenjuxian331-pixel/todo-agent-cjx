@@ -155,8 +155,9 @@ function executeAction(action: AgentAction): string {
 export async function reply(messages: ChatMessage[]): Promise<string> {
   try {
     const client = getModelClient();
-    // 模型偶发返回空内容或结构不符，自动重试一次
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    // DeepSeek 官方文档说明：JSON Output 模式下 API 偶发返回空 content（finish=stop），
+    // 建议的缓解方式就是代码重试，这里最多尝试 3 次
+    for (let attempt = 1; attempt <= 3; attempt++) {
       const completion = await client.chat.completions.create({
         model,
         temperature: 0.1,
